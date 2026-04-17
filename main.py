@@ -16,11 +16,11 @@ class Constants:
 
     # ----- ДИАПАЗОНЫ ЗНАЧЕНИЙ КОНФИГА -----
     SESSION_WORDS_MIN = 5
-    SESSION_WORDS_MAX = 50
+    SESSION_WORDS_MAX = 100
     CARD_WORDS_MIN = 2
-    CARD_WORDS_MAX = 6
-    WORD_LEARNED_LIMIT_MIN = 5
-    WORD_LEARNED_LIMIT_MAX = 50
+    CARD_WORDS_MAX = 8
+    WORD_LEARNED_LIMIT_MIN = 1
+    WORD_LEARNED_LIMIT_MAX = 10
     DELAY_MIN = 0
     DELAY_MAX = 5
 
@@ -80,16 +80,17 @@ class Constants:
     CONFIG_SAVED = "Конфиг успешно сохранён"
     WORD_ADDED = "Новое слово успешно добавлено в БД"
     WORD_EXISTS = "Некорректные данные или слово уже существует в БД"
+    FILE_EXISTS = "Файл %s уже существует. Перезаписать данные в него?"
+    NO_FILE_EXISTS = "Файл не найден"
     EMPTY_DB = "Недостаточно данных в БД..."
     EMPTY_FILE = "Файл пустой"
-    NO_FILE_EXISTS = "Файл не найден"
-    FILE_EXISTS = "Файл %s уже существует. Перезаписать данные в него?"
     NO_UNLEARNED = "Недостаточно неизученных слов. Добавьте новые, увеличьте предел изучения слова или сбросьте статистику."
     EXIT_YESNO = "Вы уверены, что хотите выйти?"
     WORD_DELETE_YESNO = "Вы уверены, что хотите удалить выделенные слова?"
     STATS_RESET_YESNO = "Вы уверены, что хотите сбросить статистику?"
     DB_RESET_YESNO = "Вы уверены, что хотите сбросить БД до начальных настроек?"
     DB_RESET_CONFIRM_YESNO = "Вы точно уверены?"
+    RESET_CURRENT_SESSION_YESNO = "Текущая сессия будет сброшена. Вернуться в меню?"
     NO_EXPORT_DATA = "Нет данных для экспорта"
     WELCOME = "Обнаружен файл %s. Заполнить базу данных данными из файла?"
     EXPORTED = "Экспортировано %s слов"
@@ -116,13 +117,13 @@ class Constants:
 
     # ----- ШИРИНА КНОПОК -----
     MENU_BUTTON_WIDTH = 25
-    SESSION_BUTTON_WIDTH = 30
-    SESSION_RESULTS_BUTTON_WIDTH = 25
-    STATS_BUTTON_WIDTH = 25
-    SETTINGS_BUTTON_WIDTH = 25
-    DB_EDITOR_BUTTON_WIDTH = 25
+    SESSION_BUTTON_WIDTH = 25
+    SESSION_RESULTS_BUTTON_WIDTH = 20
+    STATS_BUTTON_WIDTH = 20
+    SETTINGS_BUTTON_WIDTH = 20
+    DB_EDITOR_BUTTON_WIDTH = 20
     IMPORT_EXPORT_BUTTON_WIDTH = 25
-    TRANSLATION_BUTTON_WIDTH = 30
+    TRANSLATION_BUTTON_WIDTH = 20
 
     # ----- ФИЛЬТРЫ ВЫБОРКИ СЛОВ -----
     LEARNED_ONLY = "learned_only"
@@ -239,7 +240,7 @@ class Database(Constants):
         opened_words = self.cur.fetchone()[0]
 
         limit = learned_words_limit["value"]
-        self.cur.execute("SELECT COUNT(*) FROM statistics WHERE count_of_learned > ?", (limit,))
+        self.cur.execute("SELECT COUNT(*) FROM statistics WHERE count_of_learned >= ?", (limit,))
         full_learned_words = self.cur.fetchone()[0]
 
         self.cur.execute("SELECT SUM(successful_attempts), SUM(unsuccessful_attempts) FROM statistics")
@@ -382,7 +383,7 @@ LIMIT ?
         result = self.cur.fetchall()
 
         if len(result) < session_words:
-            return None
+            return []
 
         words = []
         for word_id, word_eng in result:
@@ -447,20 +448,11 @@ class VocabularyApp(Constants):
         screen_width = self.window.winfo_screenwidth()
     
         if screen_width < 1366:
-            title_size = 24
-            word_size = 22
-            text_size = 18
-            button_size = 16
+            title_size, word_size, text_size, button_size = 16, 10, 10, 10
         elif screen_width < 1920:
-            title_size = 28
-            word_size = 26
-            text_size = 20
-            button_size = 18
+            title_size, word_size, text_size, button_size = 24, 18, 18, 18
         else:
-            title_size = 32
-            word_size = 30
-            text_size = 22
-            button_size = 20
+            title_size, word_size, text_size, button_size = 30, 24, 24, 24
 
         ttk.Style().theme_use("alt")
         ttk.Style().configure(self.CORRECT_BTN_STYLE, foreground="white", background="green")
@@ -484,6 +476,13 @@ class VocabularyApp(Constants):
 
     # Отображает главное меню с кнопками: Изучение слов, Статистика, Настройки, Выход
     def show_main_menu(self):
+        if hasattr(self, "current_word") and hasattr(self, "current_words"):
+            if not self.is_session_over():
+                if not messagebox.askyesno(message=self.RESET_CURRENT_SESSION_YESNO):
+                    return
+            self.current_word = None
+            self.current_words = []
+
         for widget in self.window.winfo_children():
             widget.destroy()
 
@@ -497,10 +496,11 @@ class VocabularyApp(Constants):
         buttons_frame.pack(expand=True, fill=BOTH)
 
         ttk.Label(title_frame, text=self.MENU_TITLE, style=self.TITLE_STYLE, justify=CENTER).pack()
-        ttk.Button(buttons_frame, text="ИЗУЧЕНИЕ СЛОВ", width=self.MENU_BUTTON_WIDTH, padding=[0, 10], command=self.show_session_menu).pack(anchor=CENTER, pady=20)
-        ttk.Button(buttons_frame, text="СТАТИСТИКА", width=self.MENU_BUTTON_WIDTH, padding=[0, 10], command=self.show_stats).pack(anchor=CENTER, pady=20)
-        ttk.Button(buttons_frame, text="НАСТРОЙКИ", width=self.MENU_BUTTON_WIDTH, padding=[0, 10], command=self.show_settings).pack(anchor=CENTER, pady=20)
-        ttk.Button(buttons_frame, text="ВЫХОД", width=self.MENU_BUTTON_WIDTH, padding=[0, 10], command=self.finish).pack(anchor=CENTER, pady=20)
+        ttk.Button(buttons_frame, text="ИЗУЧЕНИЕ СЛОВ", width=self.MENU_BUTTON_WIDTH, padding=[0, 10], command=self.show_session_menu).pack(anchor=CENTER, pady=10)
+        ttk.Button(buttons_frame, text="СТАТИСТИКА", width=self.MENU_BUTTON_WIDTH, padding=[0, 10], command=self.show_stats).pack(anchor=CENTER, pady=10)
+        ttk.Button(buttons_frame, text="НАСТРОЙКИ", width=self.MENU_BUTTON_WIDTH, padding=[0, 10], command=self.show_settings).pack(anchor=CENTER, pady=10)
+        ttk.Button(buttons_frame, text="РЕДАКТОР БД", width=self.MENU_BUTTON_WIDTH, padding=[0, 10], command=self.show_database_editor).pack(anchor=CENTER, pady=10)
+        ttk.Button(buttons_frame, text="ВЫХОД", width=self.MENU_BUTTON_WIDTH, padding=[0, 10], command=self.finish).pack(anchor=CENTER, pady=10)
 
     # Отображает меню сессии изучения слов
     def show_session_menu(self):
@@ -596,8 +596,8 @@ class VocabularyApp(Constants):
 {succes_ratio}
 """.strip()).pack(side=LEFT)
 
-        ttk.Button(buttons_frame, text="Сбросить статистику", width=self.STATS_BUTTON_WIDTH, command=reset_stats).pack(pady=5)
-        ttk.Button(buttons_frame, text="В главное меню", width=self.STATS_BUTTON_WIDTH, command=self.show_main_menu).pack(pady=5)
+        ttk.Button(buttons_frame, text="Сбросить статистику", width=self.STATS_BUTTON_WIDTH, command=reset_stats).grid(column=0, row=0)
+        ttk.Button(buttons_frame, text="В главное меню", width=self.STATS_BUTTON_WIDTH, command=self.show_main_menu).grid(column=1, row=0)
 
     # Отображает окно настроек: слайдеры для изменения параметров
     def show_settings(self):
@@ -620,8 +620,8 @@ class VocabularyApp(Constants):
         def create_slider_frame(master, label_text, from_, to, variable):
             frame = ttk.Frame(master)
             frame.pack(expand=True, fill=BOTH, pady=10)
-            ttk.Label(frame, text=label_text).pack(anchor=W)
-            Scale(frame, from_=from_, to=to, variable=variable, orient=HORIZONTAL).pack(fill=X, pady=5)
+            ttk.Label(frame, text=label_text).pack(side=LEFT)
+            Scale(frame, from_=from_, to=to, variable=variable, orient=HORIZONTAL, length=400).pack(side=RIGHT, fill=X, pady=5)
 
         for widget in self.window.winfo_children():
             widget.destroy()
@@ -646,7 +646,7 @@ class VocabularyApp(Constants):
         params = [
             ("Количество слов в игре:", self.session_words["min"], self.session_words["max"], session_words_var),
             ("Вариантов перевода:", self.card_words["min"], self.card_words["max"], card_words_var),
-            ("Предел изучения слова \n(слова с пределом выше \nсчитаются изученными):", self.word_learned_limit["min"], self.word_learned_limit["max"], word_learned_limit_var),
+            ("Предел изучения слова:", self.word_learned_limit["min"], self.word_learned_limit["max"], word_learned_limit_var),
             ("Задержка между словами (сек):", self.delay["min"], self.delay["max"], delay_var)
         ]
         for param in params:
@@ -654,9 +654,8 @@ class VocabularyApp(Constants):
             create_slider_frame(center_frame, label_text, from_, to, variable)
 
         ttk.Label(title_frame, text=self.SETTINGS_TITLE, style=self.TITLE_STYLE, justify=CENTER).pack()
-        ttk.Button(buttons_frame, text="Сохранить изменения", width=self.SETTINGS_BUTTON_WIDTH, command=save_config).pack(pady=5)
-        ttk.Button(buttons_frame, text="Редактор базы данных", width=self.SETTINGS_BUTTON_WIDTH, command=self.show_database_editor).pack(pady=5)
-        ttk.Button(buttons_frame, text="В главное меню", width=self.SETTINGS_BUTTON_WIDTH, command=self.show_main_menu).pack(pady=5)
+        ttk.Button(buttons_frame, text="Сохранить изменения", width=self.SETTINGS_BUTTON_WIDTH, command=save_config).grid(column=0, row=0)
+        ttk.Button(buttons_frame, text="В главное меню", width=self.SETTINGS_BUTTON_WIDTH, command=self.show_main_menu).grid(column=1, row=0)
 
     # Отображает редактор БД: добавление/удаление слов, поиск
     def show_database_editor(self):
@@ -732,7 +731,7 @@ class VocabularyApp(Constants):
         search_frame.pack(fill=X, padx=5, pady=5)
 
         list_container = ttk.Frame(delete_word_frame)
-        list_container.pack(expand=True, fill=BOTH, padx=5)
+        list_container.pack(expand=True, fill=X, padx=5)
 
         buttons_frame = ttk.Frame(db_editor_frame)
         buttons_frame.pack(expand=True)
@@ -751,16 +750,16 @@ class VocabularyApp(Constants):
         search_entry = ttk.Entry(search_frame)
         search_entry.pack(side=LEFT, expand=True, fill=X, padx=5)
         search_entry.bind("<KeyRelease>", filter_listbox)
-        listbox = Listbox(list_container, listvariable=words_var, width=70, height=15, activestyle=DOTBOX, selectmode=EXTENDED)
+        listbox = Listbox(list_container, listvariable=words_var, width=70, height=10, activestyle=DOTBOX, selectmode=EXTENDED)
         listbox.pack(fill=BOTH, side=LEFT)
         scrollbar = ttk.Scrollbar(list_container, orient=VERTICAL, command=listbox.yview)
         scrollbar.pack(fill=Y, side=LEFT)
         listbox["yscrollcommand"] = scrollbar.set
         ttk.Button(delete_word_frame, text="Удалить", width=self.DB_EDITOR_BUTTON_WIDTH, command=delete_word).pack(fill=X, pady=10, padx=10)
 
-        ttk.Button(buttons_frame, text="Импорт / экспорт", width=self.DB_EDITOR_BUTTON_WIDTH, command=self.show_import_export_menu).pack(pady=5)
-        ttk.Button(buttons_frame, text="Очистить БД", width=self.DB_EDITOR_BUTTON_WIDTH, command=reset_db).pack(pady=5)
-        ttk.Button(buttons_frame, text="В настройки", width=self.DB_EDITOR_BUTTON_WIDTH, command=self.show_settings).pack(pady=5)
+        ttk.Button(buttons_frame, text="Импорт / экспорт", width=self.DB_EDITOR_BUTTON_WIDTH, command=self.show_import_export_menu).grid(column=0, row=0)
+        ttk.Button(buttons_frame, text="Очистить БД", width=self.DB_EDITOR_BUTTON_WIDTH, command=reset_db).grid(column=1, row=0)
+        ttk.Button(buttons_frame, text="В главное меню", width=self.DB_EDITOR_BUTTON_WIDTH, command=self.show_main_menu).grid(column=2, row=0)
 
     # Отображает меню импорта/экспорта данных
     def show_import_export_menu(self, auto_import=False):
@@ -918,18 +917,18 @@ class VocabularyApp(Constants):
         entry.pack(anchor=N)
         entry.insert(0, self.DEFAULT_FILE_NAME)
 
-        ttk.Label(separator_inner_frame, text="Разделитель:").pack(anchor=W)
+        ttk.Label(separator_inner_frame, text="Разделитель:").pack(side=LEFT)
         default_sep_radio = ttk.Radiobutton(separator_inner_frame, text="Запятая", variable=separator_var, value=",")
-        default_sep_radio.pack(anchor=W)
+        default_sep_radio.pack(side=LEFT)
         default_sep_radio.configure(state=ACTIVE)
-        ttk.Radiobutton(separator_inner_frame, text="Точка с запятой", variable=separator_var, value=";").pack(anchor=W)
-        ttk.Radiobutton(separator_inner_frame, text="Табуляция", variable=separator_var, value="    ").pack(anchor=W)
+        ttk.Radiobutton(separator_inner_frame, text="Точка с запятой", variable=separator_var, value=";").pack(side=LEFT)
+        ttk.Radiobutton(separator_inner_frame, text="Табуляция", variable=separator_var, value="    ").pack(side=LEFT)
 
         ttk.Label(import_frame, text="Настройки импорта:").pack(anchor=W)
         ttk.Checkbutton(import_frame, text="Заменять существующие слова", variable=replace_var).pack(anchor=W)
         ttk.Checkbutton(import_frame, text="Проверять минимальную длину (3 буквы)", variable=check_len_var).pack(anchor=W)
         ttk.Label(import_frame, text="(файл должен находиться в папке программы)").pack(anchor=W)
-        ttk.Label(import_frame, text="(слово,перевод1,перевод2... (например: cat,кот,кошка)").pack(anchor=W)
+        ttk.Label(import_frame, text="(слово,перевод1,перевод2...)").pack(anchor=W)
         ttk.Button(import_frame, text="Импорт из файла", width=20, command=import_data).pack(side=BOTTOM, pady=5)
 
         ttk.Label(export_frame, text="Настройки экспорта:").pack(anchor=W)
@@ -972,8 +971,8 @@ class VocabularyApp(Constants):
         ttk.Label(results_frame, text="РЕЗУЛЬТАТЫ СЕССИИ").pack(pady=20)
         ttk.Label(results_frame, text=f"Правильных ответов: {self.correct_answers} из {self.total_words}").pack(pady=10)
         ttk.Label(results_frame, text=f"Процент правильных: {percent}%").pack(pady=10)
-        ttk.Button(buttons_frame, text="Новая сессия", width=self.SESSION_RESULTS_BUTTON_WIDTH, command=self.show_session_menu).pack(pady=10)
-        ttk.Button(buttons_frame, text="В главное меню", width=self.SESSION_RESULTS_BUTTON_WIDTH, command=self.show_main_menu).pack(pady=10)
+        ttk.Button(buttons_frame, text="Новая сессия", width=self.SESSION_RESULTS_BUTTON_WIDTH, command=self.show_session_menu).grid(column=0, row=0)
+        ttk.Button(buttons_frame, text="В главное меню", width=self.SESSION_RESULTS_BUTTON_WIDTH, command=self.show_main_menu).grid(column=1, row=0)
 
     # Инициализирует новую сессию: обнуляет счётчики, загружает слова
     def start_session(self):
@@ -1012,10 +1011,12 @@ class VocabularyApp(Constants):
 
         for widget in self.buttons_frame.winfo_children():
             widget.destroy()
-        
-        for option in self.current_word["options"]:
+
+        for i, option in enumerate(self.current_word["options"]):
             btn = ttk.Button(self.buttons_frame, text=option, width=self.TRANSLATION_BUTTON_WIDTH, command=lambda opt=option: self.on_answer(opt))
-            btn.pack(pady=5)
+            row = i // 2
+            col = i % 2
+            btn.grid(row=row, column=col, padx=5, pady=5, sticky="ew")
 
             self.buttons.append(btn)
 
